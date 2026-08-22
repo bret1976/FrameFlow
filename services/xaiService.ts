@@ -21,7 +21,7 @@ interface XaiContentPart {
   inline_file?: ScriptFile;
 }
 
-const DEFAULT_TEXT_MODEL = 'grok-4.6';
+const DEFAULT_TEXT_MODEL = 'qwen2.5vl:7b';
 
 const parseModelJson = (raw: string): any => {
   const trimmed = String(raw || '').trim();
@@ -53,49 +53,52 @@ const parseModelJson = (raw: string): any => {
 
 const toUserFacingError = (error: any): Error => {
   const raw = String(error?.response?.data?.error || error?.message || '');
-  const lower = raw.toLowerCase();
-  if (
-    raw === 'AI analysis is temporarily unavailable because the provider limit was reached. Try again later.'
-    || raw === 'AI analysis failed. Please try again.'
-    || raw === 'AI analysis is not available right now.'
-  ) {
-    return new Error(raw);
-  }
-  if (/credits are exhausted/.test(lower)) {
-    return new Error(raw);
-  }
-  if (/credit|quota|rate limit|resource.?exhausted|too many requests|insufficient|billing|spend limit|429/.test(lower)) {
-    return new Error('AI analysis is temporarily unavailable because the provider limit was reached. Try again later.');
-  }
-  if (/not configured|xai_api_key is not/.test(lower)) {
-    return new Error('AI analysis is not available right now.');
-  }
+  if (raw && raw !== 'Error') return new Error(raw);
   return new Error('AI analysis failed. Please try again.');
 };
 
 const callXaiProxy = async <T>(action: 'generateText' | 'generateImage', payload: unknown): Promise<T> => {
   try {
-    const response = await axios.post<T>("/api/xai", { action, payload });
+    const response = await axios.post<T>("/api/xai", { action, payload }, { timeout: 320000 });
     return response.data;
   } catch (error: any) {
     const safe = toUserFacingError(error);
-    console.error(`xAI Proxy Error (${action}):`, safe.message);
+    console.error(`LLM proxy error (${action}):`, safe.message);
     throw safe;
   }
 };
 
+export interface HealthStatus {
+  configured: boolean;
+  provider: string;
+  textModel?: string;
+  imageConfigured?: boolean;
+  message?: string;
+}
+
+export const getHealth = async (): Promise<HealthStatus> => {
+  const response = await axios.get<HealthStatus>("/api/health", { timeout: 8000 });
+  return response.data;
+};
+
 export const checkXaiConfiguration = async (): Promise<void> => {
-  const response = await axios.get<{ configured: boolean; provider: string }>("/api/health");
-  if (!response.data.configured) {
-    throw new Error('XAI_API_KEY is not configured. Add it to .env.local and restart FrameFlow.');
+  const health = await getHealth();
+  if (!health.configured) {
+    throw new Error(health.message || 'Ollama is not running. Install from https://ollama.com, run `ollama serve`, then `ollama pull qwen2.5vl:7b`.');
+  }
+};
+
+export const checkImageConfiguration = async (): Promise<void> => {
+  const health = await getHealth();
+  if (!health.imageConfigured) {
+    throw new Error('Optional stills are not configured. Start Automatic1111 or Forge with SDXL or Flux and set A1111_HOST (for example http://127.0.0.1:7860).');
   }
 };
 
 const scriptPart = (scriptFile?: ScriptFile): XaiContentPart[] => scriptFile
   ? [{
       type: 'input_file',
-      // The server uploads this payload, replaces it with an xAI file_id, then deletes it.
-      file_id: 'pending-upload',
+      file_id: 'inline',
       inline_file: scriptFile,
     }]
   : [];
@@ -137,7 +140,8 @@ export const generateFramePrompt = async (
 
   let instructions = `You are an expert video production assistant and technical director.
 Analyze the supplied video frame and return a detailed text-to-video prompt plus technical metadata.
-Cover the subject, action, environment, cinematography, lighting, lens/angle, and artistic style.`;
+Cover the subject, action, environment, cinematography, lighting, lens/angle, and artistic style.
+Return ONLY valid JSON matching the schema.`;
 
   if (isCustomTemplate) {
     instructions += `\nFormat the prompt exactly with the user's template. Replace all {{PLACEHOLDER}} values from the frame while preserving other template text.`;
@@ -212,7 +216,8 @@ CURRENT SHOT LIST:\n${frames.map(f => `ID [${f.id}]: ${f.currentRemixPrompt || f
 
 NEWEST USER REQUEST: ${userFeedback}
 
-Update the narrative and every shot prompt to match the feedback. Preserve every frame ID exactly.`;
+Update the narrative and every shot prompt to match the feedback. Preserve every frame ID exactly.
+Return ONLY valid JSON.`;
 
   const result = await callXaiProxy<{ text: string }>('generateText', {
     model,
@@ -297,4 +302,11 @@ Rewrite this frame for the new narrative. Strictly preserve shot type, camera mo
     temperature: 0.8,
   });
   return result.text || 'Could not generate remix prompt.';
+};
+
+export const detectScenes = async (
+  payload: { url?: string; videoBase64?: string; filename?: string; threshold?: number }
+): Promise<{ timestamps: number[]; backend: string }> => {
+  const response = await axios.post<{ timestamps: number[]; backend: string }>("/api/scenes", payload, { timeout: 180000 });
+  return response.data;
 };

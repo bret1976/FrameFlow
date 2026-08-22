@@ -355,7 +355,7 @@ const FrameCard: React.FC<FrameCardProps> = ({
                                 >
                                   <div className="flex flex-col">
                                     <span className="text-[10px] font-black uppercase tracking-widest">{q} Enhancement</span>
-                                    <span className="text-[8px] opacity-50 uppercase">Grok Imagine enhancement</span>
+                                    <span className="text-[8px] opacity-50 uppercase">SDXL / Flux enhancement</span>
                                   </div>
                                   <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </button>

@@ -2,13 +2,21 @@ import express from "express";
 import path from "path";
 import cors from "cors";
 import { createServer as createViteServer, loadEnv } from "vite";
-import axios from "axios";
 import PDFDocument from "pdfkit";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
+import {
+  generateLlmText,
+  generateLocalImage,
+  getA1111Host,
+  getImageModel,
+  getTextModel,
+  probeLlm,
+  publicLlmError,
+} from "./llmGateway";
+import { detectSceneTimestamps, detectScenesFromBuffer, sceneDetectorStatus } from "./sceneDetect";
 
-const XAI_API_BASE_URL = 'https://api.x.ai/v1';
 const execFileAsync = promisify(execFile);
 
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
@@ -177,40 +185,6 @@ const resolvePlayableUrl = async (videoUrl: string, forceRefresh = false): Promi
   return task;
 };
 
-const extractUpstreamMessage = (error: any): string => {
-  const upstream = error?.response?.data?.error;
-  if (typeof upstream === 'string') return upstream;
-  if (upstream && typeof upstream.message === 'string') return upstream.message;
-  if (typeof error?.message === 'string') return error.message;
-  return '';
-};
-
-const publicXaiError = (error: any): { status: number; message: string } => {
-  const upstreamStatus = error?.response?.status;
-  const raw = extractUpstreamMessage(error);
-  console.error('xAI Proxy Error:', upstreamStatus || 'unknown', raw);
-  const text = raw.toLowerCase();
-  if (error?.message?.includes('XAI_API_KEY') || upstreamStatus === 401) {
-    return { status: 503, message: 'AI analysis is not available right now.' };
-  }
-  if (
-    upstreamStatus === 403
-    || /used all available credits|spending limit|purchase more credits|raise your spending limit/.test(text)
-  ) {
-    return {
-      status: 402,
-      message: 'xAI credits are exhausted. Add credits or raise the spend limit at console.x.ai, then retry analysis.',
-    };
-  }
-  if (
-    upstreamStatus === 429
-    || /quota|rate limit|resource.?exhausted|too many requests/.test(text)
-  ) {
-    return { status: 429, message: 'AI analysis is temporarily unavailable because the provider limit was reached. Try again later.' };
-  }
-  return { status: upstreamStatus === 400 ? 400 : 502, message: 'AI analysis failed. Please try again.' };
-};
-
 const cleanPdfText = (value: unknown): string => String(value || '')
   .replace(/```[\s\S]*?```/g, block => block.replace(/```\w*/g, ''))
   .replace(/^#{1,6}\s*/gm, '')
@@ -228,12 +202,6 @@ const imageBufferFromDataUrl = (value: unknown): Buffer | null => {
   return buffer.length <= 20 * 1024 * 1024 ? buffer : null;
 };
 
-interface InlineFile {
-  filename: string;
-  mimeType: string;
-  data: string;
-}
-
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -245,263 +213,69 @@ async function startServer() {
   }
 
   app.use(cors());
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '80mb' }));
 
-  const getXaiApiKey = () => {
-    const apiKey = process.env.XAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('XAI_API_KEY is not set in the server environment. Add it to .env.local and restart FrameFlow.');
-    }
-    return apiKey;
-  };
-
-  const xaiHeaders = () => ({
-    Authorization: `Bearer ${getXaiApiKey()}`,
-    'Content-Type': 'application/json',
-  });
-
-  // API Routes
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", async (_req, res) => {
+    const llm = await probeLlm();
+    const scenes = await sceneDetectorStatus();
+    const imageHost = getA1111Host();
     res.json({
       status: "ok",
-      provider: "xAI",
-      configured: Boolean(process.env.XAI_API_KEY),
-      textModel: process.env.XAI_TEXT_MODEL || 'grok-4.6',
-      imageModel: process.env.XAI_IMAGE_MODEL || 'grok-imagine-image-quality',
+      provider: llm.provider,
+      configured: llm.configured,
+      host: llm.host,
+      textModel: llm.textModel || getTextModel(),
+      imageConfigured: Boolean(imageHost),
+      imageHost: imageHost || null,
+      imageModel: getImageModel() || (imageHost ? "sdxl-or-flux" : null),
+      models: llm.models,
+      scenes,
+      message: llm.message,
     });
   });
 
-  // Helper for retries with jitter and more attempts for rate limits
-  const withRetry = async <T>(fn: () => Promise<T>, retries = 5, initialDelay = 2000): Promise<T> => {
-    let currentDelay = initialDelay;
-    for (let i = 0; i < retries; i++) {
-      try {
-        return await fn();
-      } catch (error: any) {
-        const status = error.response?.status || error.status;
-        const isRateLimit = error.message?.includes('429') || status === 429;
-        const isRetryable = isRateLimit || status === 408 || status === 500 || status === 502 || status === 503 || status === 504;
-        
-        if (i < retries - 1 && isRetryable) {
-          // Add jitter to avoid thundering herd
-          const jitter = Math.random() * 1000;
-          const waitTime = currentDelay + jitter;
-          
-          console.log(`[RETRY ${i + 1}/${retries}] xAI error ${status || 'Unknown'}, retrying in ${Math.round(waitTime)}ms...`);
-          
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          currentDelay *= 2; // Exponential backoff
-          continue;
-        }
-        throw error;
-      }
-    }
-    throw new Error("Maximum retries exceeded");
-  };
-
-  const uploadTemporaryFile = async (file: InlineFile): Promise<string> => {
-    const bytes = Buffer.from(file.data, 'base64');
-    if (bytes.length > 48 * 1024 * 1024) throw new Error('Script attachment exceeds xAI\'s 48 MB file limit.');
-    const formData = new FormData();
-    // xAI requires expires_after to precede the file field.
-    formData.append('expires_after', '3600');
-    formData.append('purpose', 'assistants');
-    formData.append('file', new Blob([new Uint8Array(bytes)], { type: file.mimeType || 'application/octet-stream' }), file.filename || 'script');
-    const response = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/files`, formData, {
-      headers: { Authorization: `Bearer ${getXaiApiKey()}` },
-      timeout: 120000,
-    }), 3, 1000);
-    if (!response.data?.id) throw new Error('xAI did not return an ID for the uploaded script.');
-    return response.data.id;
-  };
-
-  const deleteTemporaryFile = async (fileId: string) => {
-    try {
-      await axios.delete(`${XAI_API_BASE_URL}/files/${encodeURIComponent(fileId)}`, {
-        headers: { Authorization: `Bearer ${getXaiApiKey()}` },
-        timeout: 30000,
-      });
-    } catch (error: any) {
-      console.warn(`Could not immediately delete temporary xAI file ${fileId}: ${error.message}`);
-    }
-  };
-
-  const prepareInputFiles = async (input: any): Promise<{ input: any; uploadedIds: string[] }> => {
-    const cloned = structuredClone(input);
-    const uploadedIds: string[] = [];
-    if (!Array.isArray(cloned)) return { input: cloned, uploadedIds };
-
-    for (const message of cloned) {
-      if (!Array.isArray(message?.content)) continue;
-      for (const part of message.content) {
-        if (part?.type !== 'input_file') continue;
-        const inlineFile = part.inline_file as InlineFile | undefined;
-        if (!inlineFile) continue;
-        if (typeof inlineFile.data !== 'string' || typeof inlineFile.filename !== 'string') {
-          throw new Error('Invalid inline file attachment.');
-        }
-        const fileId = await uploadTemporaryFile(inlineFile);
-        uploadedIds.push(fileId);
-        part.file_id = fileId;
-        delete part.inline_file;
-      }
-    }
-    return { input: cloned, uploadedIds };
-  };
-
-  const extractResponseText = (response: any): string => {
-    const fromContent = (content: any): string => {
-      if (typeof content === 'string' && content.trim()) return content;
-      if (!Array.isArray(content)) return '';
-      return content
-        .map((part: any) => {
-          if (typeof part === 'string') return part;
-          if (typeof part?.text === 'string') return part.text;
-          return '';
-        })
-        .join('')
-        .trim();
-    };
-
-    if (Array.isArray(response?.output)) {
-      for (const item of [...response.output].reverse()) {
-        if (item?.type && item.type !== 'message' && item.type !== 'output_text') continue;
-        const text = fromContent(item?.content) || (typeof item?.text === 'string' ? item.text : '');
-        if (text) return text;
-      }
-    }
-
-    const chatText = fromContent(response?.choices?.[0]?.message?.content);
-    if (chatText) return chatText;
-    if (typeof response?.output_text === 'string' && response.output_text.trim()) {
-      return response.output_text;
-    }
-    const kinds = Array.isArray(response?.output)
-      ? response.output.map((item: any) => item?.type || typeof item).join(',')
-      : typeof response?.object;
-    console.error('xAI returned no extractable text. output types:', kinds || 'none');
-    throw new Error('xAI returned no text output.');
-  };
-
-  const toChatMessages = (input: any, instructions?: string): any[] => {
-    const messages: any[] = [];
-    if (instructions) messages.push({ role: 'system', content: instructions });
-    if (typeof input === 'string') {
-      messages.push({ role: 'user', content: input });
-      return messages;
-    }
-    if (!Array.isArray(input)) return messages;
-    for (const item of input) {
-      const role = item?.role || 'user';
-      if (typeof item?.content === 'string') {
-        messages.push({ role, content: item.content });
-        continue;
-      }
-      if (!Array.isArray(item?.content)) continue;
-      const content = item.content.map((part: any) => {
-        if (part?.type === 'input_text' || part?.type === 'text') {
-          return { type: 'text', text: part.text || '' };
-        }
-        if (part?.type === 'input_image' || part?.type === 'image_url') {
-          const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
-          return { type: 'image_url', image_url: { url, detail: part.detail || 'high' } };
-        }
-        if (part?.type === 'input_file' && part.file_id) {
-          return { type: 'file', file: { file_id: part.file_id } };
-        }
-        return part;
-      });
-      messages.push({ role, content });
-    }
-    return messages;
-  };
-
-  // Server-side xAI gateway. The API key never enters the browser bundle.
+  // Same client contract as before: POST /api/xai { action, payload }.
+  // Backed by Ollama Qwen2.5-VL (laptop) or vLLM Qwen3-VL (GPU).
   app.post("/api/xai", async (req, res) => {
     const { action, payload = {} } = req.body || {};
-    const uploadedIds: string[] = [];
     try {
-      getXaiApiKey();
-
-      if (action === 'generateText') {
-        const prepared = await prepareInputFiles(payload.input);
-        uploadedIds.push(...prepared.uploadedIds);
-        const model = payload.model || process.env.XAI_TEXT_MODEL || 'grok-4.6';
-        const chatBody: any = {
-          model,
-          messages: toChatMessages(prepared.input, payload.instructions),
-          temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
-        };
-        if (payload.responseSchema) {
-          chatBody.response_format = {
-            type: 'json_schema',
-            json_schema: {
-              name: payload.responseSchema.name,
-              schema: payload.responseSchema.schema,
-              strict: true,
-            },
-          };
-        }
-
-        try {
-          const chatResult = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/chat/completions`, chatBody, {
-            headers: xaiHeaders(),
-            timeout: 180000,
-          }));
-          return res.json({ text: extractResponseText(chatResult.data) });
-        } catch (chatError: any) {
-          const chatStatus = chatError?.response?.status;
-          // If structured output is rejected, retry as plain JSON object.
-          if (chatStatus === 400 && payload.responseSchema) {
-            console.warn('json_schema rejected, retrying chat/completions as json_object');
-            const looseBody = { ...chatBody, response_format: { type: 'json_object' } };
-            const loose = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/chat/completions`, looseBody, {
-              headers: xaiHeaders(),
-              timeout: 180000,
-            }));
-            return res.json({ text: extractResponseText(loose.data) });
-          }
-          throw chatError;
-        }
+      if (action === "generateText") {
+        const text = await generateLlmText(payload);
+        return res.json({ text });
       }
-
-      if (action === 'generateImage') {
-        if (typeof payload.prompt !== 'string' || !payload.prompt.trim()) throw new Error('Image prompt is required.');
-        const hasReference = typeof payload.referenceImage === 'string' && payload.referenceImage.length > 0;
-        const endpoint = hasReference ? 'images/edits' : 'images/generations';
-        const body: any = {
-          model: process.env.XAI_IMAGE_MODEL || 'grok-imagine-image-quality',
-          prompt: payload.prompt,
-          response_format: 'b64_json',
-          resolution: payload.resolution === '2k' ? '2k' : '1k',
-          aspect_ratio: payload.aspectRatio || '16:9',
-        };
-        if (hasReference) {
-          const imageUrl = payload.referenceImage.startsWith('data:')
-            ? payload.referenceImage
-            : `data:image/jpeg;base64,${payload.referenceImage}`;
-          body.image = { url: imageUrl, type: 'image_url' };
-        }
-        const result = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/${endpoint}`, body, {
-          headers: xaiHeaders(),
-          timeout: 360000,
-        }), 4, 2000);
-        const image = result.data?.data?.[0];
-        if (image?.b64_json) return res.json({ image: `data:${image.mime_type || 'image/jpeg'};base64,${image.b64_json}` });
-        if (image?.url) {
-          const downloaded = await axios.get(image.url, { responseType: 'arraybuffer', timeout: 120000 });
-          const mimeType = downloaded.headers['content-type'] || image.mime_type || 'image/jpeg';
-          return res.json({ image: `data:${mimeType};base64,${Buffer.from(downloaded.data).toString('base64')}` });
-        }
-        throw new Error('xAI returned no generated image.');
+      if (action === "generateImage") {
+        const image = await generateLocalImage(payload);
+        return res.json({ image });
       }
-
       res.status(400).json({ error: "Invalid action" });
     } catch (error: any) {
-      const safe = publicXaiError(error);
+      const safe = publicLlmError(error);
       res.status(safe.status).json({ error: safe.message });
-    } finally {
-      await Promise.all(uploadedIds.map(deleteTemporaryFile));
+    }
+  });
+
+  app.post("/api/scenes", async (req, res) => {
+    try {
+      const threshold = Number(req.body?.threshold) || 27;
+      if (typeof req.body?.videoBase64 === "string" && req.body.videoBase64) {
+        const raw = req.body.videoBase64.includes("base64,")
+          ? req.body.videoBase64.split("base64,")[1]
+          : req.body.videoBase64;
+        const buffer = Buffer.from(raw, "base64");
+        if (buffer.length > 80 * 1024 * 1024) {
+          return res.status(413).json({ error: "Scene detection is limited to 80 MB uploads." });
+        }
+        const result = await detectScenesFromBuffer(buffer, req.body?.filename || "clip.mp4", threshold);
+        return res.json(result);
+      }
+      const url = typeof req.body?.url === "string" ? req.body.url : "";
+      if (!url) return res.status(400).json({ error: "Pass a video URL or videoBase64." });
+      const targetUrl = needsPlatformResolver(url) ? await resolvePlayableUrl(url) : url;
+      const result = await detectSceneTimestamps(targetUrl, { threshold });
+      return res.json(result);
+    } catch (error: any) {
+      console.error("Scene detect error:", error?.message || error);
+      res.status(502).json({ error: "Shot-cut detection failed. FrameFlow will fall back to browser cuts or interval sampling." });
     }
   });
 

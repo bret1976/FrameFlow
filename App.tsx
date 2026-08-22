@@ -32,7 +32,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import VideoUploader, { SAMPLE_VIDEOS, proxyVideoUrl } from './components/VideoUploader';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
-import { extractFramesFromVideo } from './utils/videoProcessor';
+import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
 import {
   buildProductionPacket,
   downloadTextFile,
@@ -47,7 +47,9 @@ import {
   generateRemixPrompt,
   generateRemixStoryScript,
   refineRemix,
-  checkXaiConfiguration
+  checkXaiConfiguration,
+  checkImageConfiguration,
+  getHealth,
 } from './services/xaiService';
 import { FrameData, AnalysisStatus, AppSettings } from './types';
 
@@ -147,11 +149,25 @@ const App: React.FC = () => {
   // Settings
   const [settings, setSettings] = useState<AppSettings>({
     samplingInterval: 3, // Default 3 seconds
-    xaiModel: 'grok-4.6',
+    shotMode: 'cuts',
+    sceneThreshold: 27,
+    xaiModel: 'qwen2.5vl:7b',
     customInstructions: '',
     promptTemplate: '{{PROMPT}}' // Default template
   });
   const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    getHealth().then((health) => {
+      if (health.textModel) {
+        setSettings((prev) => (
+          prev.xaiModel === 'qwen2.5vl:7b' || prev.xaiModel.startsWith('grok-')
+            ? { ...prev, xaiModel: health.textModel as string }
+            : prev
+        ));
+      }
+    }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (status !== AnalysisStatus.COMPLETED || frames.length === 0) return;
@@ -176,7 +192,19 @@ const App: React.FC = () => {
       await checkXaiConfiguration();
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'xAI is not configured.';
+      const message = error instanceof Error ? error.message : 'Ollama is not running. Install it, pull qwen2.5vl:7b, and retry.';
+      setGlobalError(message);
+      alert(message);
+      return false;
+    }
+  };
+
+  const ensureImageBackend = async (): Promise<boolean> => {
+    try {
+      await checkImageConfiguration();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Optional stills are not configured.';
       setGlobalError(message);
       alert(message);
       return false;
@@ -248,12 +276,28 @@ const App: React.FC = () => {
     setShowVerify(false);
 
     try {
-      // 1. Extract Frames
-      const extractedFrames = await extractFramesFromVideo(
-        videoUrl, 
-        settings.samplingInterval,
-        (prog) => setProgress(prog)
-      );
+      // 1. Extract frames: shot cuts (PySceneDetect ContentDetector) or interval sampling.
+      let extractedFrames: { timestamp: number; imageUrl: string }[] = [];
+      if (settings.shotMode === 'cuts') {
+        extractedFrames = await extractShotFramesFromVideo(
+          videoUrl,
+          { threshold: settings.sceneThreshold, maxShots: 40 },
+          (prog) => setProgress(prog)
+        );
+        if (extractedFrames.length < 2) {
+          extractedFrames = await extractFramesFromVideo(
+            videoUrl,
+            settings.samplingInterval,
+            (prog) => setProgress(prog)
+          );
+        }
+      } else {
+        extractedFrames = await extractFramesFromVideo(
+          videoUrl,
+          settings.samplingInterval,
+          (prog) => setProgress(prog)
+        );
+      }
 
       if (extractedFrames.length === 0) {
         throw new Error("No frames could be extracted from the video. Please try a different video or check the format.");
@@ -303,7 +347,7 @@ const App: React.FC = () => {
           } catch (error) {
             console.error(`Frame analysis error for frame ${frame.id}:`, error);
             const errorMessage = error instanceof Error ? error.message : 'Failed to analyze';
-            if (/credits are exhausted|spend limit|provider limit|not available right now/i.test(errorMessage)) {
+            if (/ollama is not|not reachable|not installed|timed out|not available right now|provider limit/i.test(errorMessage)) {
               providerError = errorMessage;
             }
             setFrames(prev => prev.map(f => 
@@ -318,9 +362,8 @@ const App: React.FC = () => {
         const currentProgress = Math.round(((i + BATCH_SIZE) / initialFrames.length) * 100);
         setProgress(Math.min(100, currentProgress));
 
-        // Delay between frames to respect RPM limits
         if (i + BATCH_SIZE < initialFrames.length) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 150));
         }
       }
 
@@ -389,7 +432,7 @@ const App: React.FC = () => {
   const processBatchImageGeneration = async (frameIds: string[]) => {
     if (frameIds.length === 0) return;
     
-    const hasKey = await ensureApiKey();
+    const hasKey = await ensureImageBackend();
     if (!hasKey) return;
 
     const framesToProcess = frames.filter(f => frameIds.includes(f.id) && f.prompt);
@@ -430,7 +473,7 @@ const App: React.FC = () => {
     const frame = frames.find(f => f.id === frameId);
     if (!frame || !frame.prompt) return;
 
-    const hasKey = await ensureApiKey();
+    const hasKey = await ensureImageBackend();
     if (!hasKey) return;
 
     setFrames(prev => prev.map(f => f.id === frameId ? { ...f, isGeneratingImage: true } : f));
@@ -446,7 +489,7 @@ const App: React.FC = () => {
         setFrames(prev => prev.map(f => 
             f.id === frameId ? { ...f, isGeneratingImage: false } : f
         ));
-        alert("Failed to generate image. Please ensure you have selected a valid project/key.");
+        alert("Failed to generate image. Start Automatic1111/Forge with SDXL or Flux and set A1111_HOST.");
     }
   };
 
@@ -458,7 +501,7 @@ const App: React.FC = () => {
     const imageToUpscale = frame.generatedImage || frame.remixImage;
     if (!imageToUpscale) return;
 
-    const hasKey = await ensureApiKey();
+    const hasKey = await ensureImageBackend();
     if (!hasKey) return;
 
     setFrames(prev => prev.map(f => f.id === frameId ? { ...f, isUpscaling: true } : f));
@@ -480,7 +523,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Upscale failed:", e);
       setFrames(prev => prev.map(f => f.id === frameId ? { ...f, isUpscaling: false } : f));
-      alert("Upscale failed. Please check your API key and model availability.");
+      alert("Upscale failed. Check Automatic1111/Forge and A1111_HOST.");
     }
   };
 
@@ -660,7 +703,7 @@ const App: React.FC = () => {
 
         // Delay between remix batches
         if (i + BATCH_SIZE < framesToRemix.length) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 150));
         }
       }
 
@@ -757,7 +800,7 @@ const App: React.FC = () => {
       }
     }
 
-    const hasKey = await ensureApiKey();
+    const hasKey = await ensureImageBackend();
     if (!hasKey) return;
 
     setIsGeneratingRemixImages(true);
@@ -789,9 +832,8 @@ const App: React.FC = () => {
         }
       }));
 
-      // Delay between remix image generations
       if (i + BATCH_SIZE < framesToProcess.length) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 150));
       }
     }
     setIsGeneratingRemixImages(false);
@@ -985,9 +1027,8 @@ const App: React.FC = () => {
           }
        }));
 
-       // Delay between regeneration requests
        if (i + BATCH_SIZE < framesToProcess.length) {
-         await new Promise(resolve => setTimeout(resolve, 2000));
+         await new Promise(resolve => setTimeout(resolve, 150));
        }
     }
   };
@@ -1145,17 +1186,39 @@ const App: React.FC = () => {
                       <div className="space-y-8">
                         <div className="space-y-4">
                           <label className="text-[10px] font-bold text-neon uppercase tracking-widest flex items-center gap-2">
-                             01. Sampling Interval
+                             01. Shot Cuts
                           </label>
-                          <div className="flex items-center gap-6">
-                            <input 
-                              type="range" min="1" max="10" step="1"
-                              value={settings.samplingInterval}
-                              onChange={(e) => setSettings({...settings, samplingInterval: parseInt(e.target.value)})}
-                              className="flex-grow accent-neon"
-                            />
-                            <span className="text-2xl font-black font-display text-white w-16">{settings.samplingInterval}s</span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, shotMode: 'cuts' })}
+                              className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest border ${settings.shotMode === 'cuts' ? 'bg-neon text-black border-neon' : 'border-white/10 text-white/50'}`}
+                            >
+                              Scene Cuts
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, shotMode: 'interval' })}
+                              className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest border ${settings.shotMode === 'interval' ? 'bg-neon text-black border-neon' : 'border-white/10 text-white/50'}`}
+                            >
+                              Interval
+                            </button>
                           </div>
+                          {settings.shotMode === 'interval' ? (
+                            <div className="flex items-center gap-6">
+                              <input
+                                type="range" min="1" max="10" step="1"
+                                value={settings.samplingInterval}
+                                onChange={(e) => setSettings({...settings, samplingInterval: parseInt(e.target.value)})}
+                                className="flex-grow accent-neon"
+                              />
+                              <span className="text-2xl font-black font-display text-white w-16">{settings.samplingInterval}s</span>
+                            </div>
+                          ) : (
+                            <p className="text-[9px] text-white/30 font-mono uppercase tracking-wider">
+                              PySceneDetect ContentDetector (HSV cuts). Falls back to {settings.samplingInterval}s interval if few cuts are found.
+                            </p>
+                          )}
                         </div>
 
                         <div className="space-y-4">
@@ -1172,17 +1235,17 @@ const App: React.FC = () => {
 
                         <div className="space-y-4">
                           <label className="text-[10px] font-bold text-neon uppercase tracking-widest flex items-center gap-2">
-                             03. Grok Vision / Text Model
+                             03. Vision / Text Model
                           </label>
                           <input
                             type="text"
                             className="w-full bg-transparent border border-white/10 p-4 text-sm text-white/80 focus:border-neon outline-none font-mono"
                             value={settings.xaiModel}
                             onChange={(e) => setSettings({ ...settings, xaiModel: e.target.value })}
-                            placeholder="grok-4.6"
+                            placeholder="qwen2.5vl:7b"
                           />
                           <p className="text-[9px] text-white/30 font-mono uppercase tracking-wider">
-                            Must support image understanding for frame analysis
+                            Ollama: qwen2.5vl:7b or qwen2.5vl:3b. GPU/vLLM: Qwen3-VL 8B or 32B
                           </p>
                         </div>
                       </div>
@@ -1380,7 +1443,7 @@ const App: React.FC = () => {
                             <div className="flex items-center gap-3">
                               <Loader2 className="w-5 h-5 animate-spin text-neon" />
                               <span className="text-[10px] font-black uppercase tracking-widest text-neon">
-                                {status === AnalysisStatus.EXTRACTING ? 'Splitting' : 'Analyzing'}
+                                {status === AnalysisStatus.EXTRACTING ? (settings.shotMode === 'cuts' ? 'Detecting cuts' : 'Splitting') : 'Analyzing'}
                               </span>
                             </div>
                             <div className="w-32 sm:w-48 h-2 bg-white/10 rounded-full overflow-hidden">

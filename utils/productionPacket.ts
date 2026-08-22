@@ -203,7 +203,7 @@ export const buildQualityReport = (
 
   const providerErrors = inventory
     .map((row) => row.error || '')
-    .filter((msg) => /credits are exhausted|spend limit|provider limit|not available right now/i.test(msg));
+    .filter((msg) => /ollama is not|not reachable|not installed|timed out|credits are exhausted|spend limit|provider limit|not available right now/i.test(msg));
   if (providerErrors.length && providerErrors.length === inventory.filter((row) => row.hasError).length) {
     issues.push({
       severity: 'fail',
@@ -292,7 +292,7 @@ export const buildQualityReport = (
     issues.push({
       severity: 'info',
       code: 'NO_STILLS',
-      message: 'Prompts are ready but no Grok Imagine stills have been generated yet.',
+      message: 'Prompts are ready but no SDXL/Flux stills have been generated yet.',
     });
   }
 

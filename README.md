@@ -1,47 +1,85 @@
 # FrameFlow
 
-FrameFlow turns a video into sampled frames, uses Grok vision to create production-ready prompts and shot metadata, and can build storyboards, remix narratives, and generate or enhance images with Grok Imagine.
+FrameFlow turns a video into shot-cut frames, uses a local vision model to write production prompts and shot metadata, and can build storyboards, remix narratives, and optionally generate stills with SDXL or Flux.
 
-## What the xAI integration covers
+The UI and browser frame split are unchanged. Analysis no longer uses Grok or xAI credits.
 
-- Grok multimodal frame analysis with structured JSON output
-- Story, remix, and refinement generation
-- PDF or text script attachments through xAI Files (temporary uploads are deleted after use)
-- Grok Imagine image generation and reference-image editing
-- Grok Imagine 2K enhancement
-- Server-side API key handling, retry/backoff, configuration preflight, and actionable errors
+## Stack
+
+- **Shot cuts:** PySceneDetect ContentDetector (HSV mean-abs-diff) in the browser. Optional server `/api/scenes` uses PySceneDetect if the `scenedetect` CLI is installed, otherwise ffmpeg scene scores.
+- **Per-frame prompt + shot type / angle / lighting:** [Qwen2.5-VL 7B](https://ollama.com/library/qwen2.5vl) on [Ollama](https://ollama.com) (laptop). On a GPU box, point at [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) 8B/32B via vLLM (`LLM_PROVIDER=vllm`).
+- **Story / remix text:** the same Qwen chat head (or any local model Ollama/vLLM serves).
+- **Optional stills:** Automatic1111 or Forge running Flux or SDXL (`A1111_HOST`).
+- **HTTP pattern:** the browser still `POST /api/xai` with `{ action, payload }`. The server sends the frame image and asks for JSON.
+
+App shape is closest to [byjlw/video-analyzer](https://github.com/byjlw/video-analyzer): local Ollama, image-in / JSON-out, no cloud key.
 
 ## Run locally
 
-Prerequisites: Node.js 20 or newer and an [xAI API key](https://console.x.ai/).
+Prerequisites: Node.js 20+, [Ollama](https://ollama.com), and ffmpeg (`brew install ffmpeg`).
 
-1. Install dependencies:
+1. Install and pull the vision model:
+
+   ```bash
+   ollama serve
+   ollama pull qwen2.5vl:7b
+   ```
+
+   Laptops with 8 GB RAM can use `qwen2.5vl:3b`. A GPU box can use `qwen3-vl:8b` or a vLLM Qwen3-VL endpoint.
+
+2. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Copy the environment template and add your key:
+3. Copy the environment template (optional — defaults talk to local Ollama):
 
    ```bash
    cp .env.example .env.local
    ```
 
    ```dotenv
-   XAI_API_KEY=your_xai_api_key
-   XAI_TEXT_MODEL=grok-4.6
-   XAI_IMAGE_MODEL=grok-imagine-image-quality
+   LLM_PROVIDER=ollama
+   OLLAMA_HOST=http://127.0.0.1:11434
+   LLM_TEXT_MODEL=qwen2.5vl:7b
    ```
 
-3. Start FrameFlow:
+4. Start FrameFlow:
 
    ```bash
    npm run dev
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000).
+5. Open [http://localhost:3000](http://localhost:3000).
 
-The key is read only by the Express server and is never included in the browser bundle. The text/vision model can also be changed in Analysis Settings. It must support image understanding.
+### GPU / vLLM
+
+```dotenv
+LLM_PROVIDER=vllm
+VLLM_BASE_URL=http://127.0.0.1:8000/v1
+LLM_TEXT_MODEL=Qwen/Qwen3-VL-8B-Instruct
+```
+
+### Optional stills (Flux or SDXL)
+
+Start Automatic1111 or Forge with `--api`, load a Flux or SDXL checkpoint, then:
+
+```dotenv
+A1111_HOST=http://127.0.0.1:7860
+```
+
+Analysis works without this. Image generation and 2K enhance need it.
+
+### Optional PySceneDetect CLI
+
+Browser cuts are the default. For server-side detection on a URL or uploaded clip:
+
+```bash
+pip install scenedetect
+```
+
+The `scenedetect` binary is used when present; otherwise `/api/scenes` uses ffmpeg.
 
 ## Verify and deploy
 
@@ -51,17 +89,14 @@ npm run build
 npm start
 ```
 
-Production serves the built app and API from port `3000`. Set `XAI_API_KEY` in the deployment environment; `.env.local` is ignored by Git.
-
-### Railway
-
-The included `railway.json` and `Dockerfile` configure the production build, current `yt-dlp` YouTube resolver, start command, health check, and restart policy. Create a Railway service from this repository and set `XAI_API_KEY`, `XAI_TEXT_MODEL`, and `XAI_IMAGE_MODEL` as service variables. Railway supplies the runtime `PORT` automatically.
+Production serves the built app and API from port `3000`. For Railway, set `OLLAMA_HOST` (or `VLLM_BASE_URL`) to a machine that actually runs the model. Railway's container does not run Ollama.
 
 ## Notes
 
-- Grok Imagine currently supports native 1K and 2K output. The app therefore exposes 2K for AI enhancement.
-- Remote video URLs still depend on the source allowing retrieval. YouTube URLs are resolved with yt-dlp (`android_vr` first) to a progressive MP4; HLS/DASH is rejected with an honest error. The YouTube_Sample chip (`watch?v=aqz-KE-bpKQ`) falls back to a public Big Buck Bunny MP4 (test-videos.co.uk) if YouTube blocks the server.
-- Frame images stay in browser local storage; AI requests send the selected frame to xAI for analysis or generation.
+- Config → Shot Cuts uses scene detection; Interval is the older every-N-seconds path.
+- Remote video URLs still depend on the source allowing retrieval. YouTube URLs are resolved with yt-dlp to a progressive MP4; HLS/DASH is rejected. The YouTube_Sample chip (`watch?v=aqz-KE-bpKQ`) falls back to a public Big Buck Bunny MP4 if YouTube blocks the server.
+- Frame images stay in browser local storage. Analysis sends the selected frame to Ollama/vLLM only.
+- Script attachments are inlined as text. Paste the script if the file is a PDF.
 
 ## Production packet and verify pass
 

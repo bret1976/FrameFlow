@@ -47,6 +47,8 @@ export enum AnalysisStatus {
 
 export interface AppSettings {
   samplingInterval: number; // Seconds between frames
+  shotMode: 'cuts' | 'interval';
+  sceneThreshold: number;
   xaiModel: string;
   customInstructions: string;
   promptTemplate: string; // Template with placeholders like {{PROMPT}}
