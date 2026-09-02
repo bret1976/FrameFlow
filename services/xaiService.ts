@@ -21,7 +21,7 @@ interface XaiContentPart {
   inline_file?: ScriptFile;
 }
 
-const DEFAULT_TEXT_MODEL = 'qwen2.5vl:7b';
+const DEFAULT_TEXT_MODEL = 'grok-4.6';
 
 const parseModelJson = (raw: string): any => {
   const trimmed = String(raw || '').trim();
@@ -84,6 +84,10 @@ export const getHealth = async (): Promise<HealthStatus> => {
 export const checkXaiConfiguration = async (): Promise<void> => {
   const health = await getHealth();
   if (!health.configured) {
+    const provider = String(health.provider || '').toLowerCase();
+    if (provider.includes('xai') || provider.includes('grok')) {
+      throw new Error('XAI_API_KEY is not configured. Add it to .env.local and restart FrameFlow.');
+    }
     throw new Error(health.message || 'Ollama is not running. Install from https://ollama.com, run `ollama serve`, then `ollama pull qwen2.5vl:7b`.');
   }
 };
@@ -91,7 +95,7 @@ export const checkXaiConfiguration = async (): Promise<void> => {
 export const checkImageConfiguration = async (): Promise<void> => {
   const health = await getHealth();
   if (!health.imageConfigured) {
-    throw new Error('Optional stills are not configured. Start Automatic1111 or Forge with SDXL or Flux and set A1111_HOST (for example http://127.0.0.1:7860).');
+    throw new Error('Image generation is not configured. Set XAI_API_KEY for Grok images, or start Automatic1111/Forge and set A1111_HOST.');
   }
 };
 

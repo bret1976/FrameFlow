@@ -1,9 +1,16 @@
 import axios from "axios";
 
-export type LlmProvider = "ollama" | "vllm";
+export type LlmProvider = "xai" | "ollama" | "vllm";
 
+const XAI_API_BASE_URL = "https://api.x.ai/v1";
 const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
-const DEFAULT_TEXT_MODEL = "qwen2.5vl:7b";
+const DEFAULT_OLLAMA_TEXT_MODEL = "qwen2.5vl:7b";
+const DEFAULT_XAI_TEXT_MODEL = "grok-4.6";
+const DEFAULT_XAI_IMAGE_MODEL = "grok-imagine-image-quality";
+
+export const getXaiApiKey = (): string =>
+  (process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.XAI_KEY || "").trim();
+
 
 const extractUpstreamMessage = (error: any): string => {
   const upstream = error?.response?.data?.error;
@@ -14,7 +21,36 @@ const extractUpstreamMessage = (error: any): string => {
   return "";
 };
 
+const publicXaiError = (error: any): { status: number; message: string } => {
+  const upstreamStatus = error?.response?.status;
+  const raw = extractUpstreamMessage(error);
+  console.error("xAI Proxy Error:", upstreamStatus || "unknown", raw);
+  const text = raw.toLowerCase();
+  if (error?.message?.includes("XAI_API_KEY") || upstreamStatus === 401) {
+    return { status: 503, message: "AI analysis is not available right now." };
+  }
+  if (
+    upstreamStatus === 403
+    || /used all available credits|spending limit|purchase more credits|raise your spending limit/.test(text)
+  ) {
+    return {
+      status: 402,
+      message: "xAI credits are exhausted. Add credits or raise the spend limit at console.x.ai, then retry analysis.",
+    };
+  }
+  if (
+    upstreamStatus === 429
+    || /quota|rate limit|resource.?exhausted|too many requests/.test(text)
+  ) {
+    return { status: 429, message: "AI analysis is temporarily unavailable because the provider limit was reached. Try again later." };
+  }
+  return { status: upstreamStatus === 400 ? 400 : 502, message: "AI analysis failed. Please try again." };
+};
+
 export const publicLlmError = (error: any): { status: number; message: string } => {
+  if (getLlmProvider() === "xai" || String(error?.message || "").includes("XAI_API_KEY")) {
+    return publicXaiError(error);
+  }
   const upstreamStatus = error?.response?.status;
   const raw = extractUpstreamMessage(error);
   const text = raw.toLowerCase();
@@ -57,8 +93,14 @@ export const publicLlmError = (error: any): { status: number; message: string } 
   };
 };
 
-export const getLlmProvider = (): LlmProvider =>
-  process.env.LLM_PROVIDER === "vllm" ? "vllm" : "ollama";
+export const getLlmProvider = (): LlmProvider => {
+  const explicit = (process.env.LLM_PROVIDER || "").trim().toLowerCase();
+  // Production Railway has XAI_API_KEY. Prefer Grok whenever a key is present.
+  if (getXaiApiKey()) return "xai";
+  if (explicit === "vllm") return "vllm";
+  if (explicit === "xai" || explicit === "grok") return "xai";
+  return "ollama";
+};
 
 export const getOllamaHost = (): string =>
   (process.env.OLLAMA_HOST || DEFAULT_OLLAMA_HOST).replace(/\/$/, "");
@@ -66,14 +108,24 @@ export const getOllamaHost = (): string =>
 export const getVllmBaseUrl = (): string =>
   (process.env.VLLM_BASE_URL || "http://127.0.0.1:8000/v1").replace(/\/$/, "");
 
-export const getTextModel = (): string =>
-  process.env.LLM_TEXT_MODEL || process.env.XAI_TEXT_MODEL || DEFAULT_TEXT_MODEL;
+export const getTextModel = (): string => {
+  if (getLlmProvider() === "xai") {
+    return process.env.XAI_TEXT_MODEL || process.env.GROK_TEXT_MODEL || DEFAULT_XAI_TEXT_MODEL;
+  }
+  return process.env.LLM_TEXT_MODEL || DEFAULT_OLLAMA_TEXT_MODEL;
+};
 
 export const getA1111Host = (): string =>
   (process.env.A1111_HOST || "").replace(/\/$/, "");
 
-export const getImageModel = (): string =>
-  process.env.LLM_IMAGE_MODEL || process.env.A1111_MODEL || "";
+export const getImageModel = (): string => {
+  if (getLlmProvider() === "xai") {
+    return process.env.XAI_IMAGE_MODEL || process.env.GROK_IMAGE_MODEL || DEFAULT_XAI_IMAGE_MODEL;
+  }
+  return process.env.LLM_IMAGE_MODEL || process.env.A1111_MODEL || "";
+};
+
+export const getXaiHost = (): string => XAI_API_BASE_URL;
 
 const llmHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -220,6 +272,20 @@ export const probeLlm = async (): Promise<{
 }> => {
   const provider = getLlmProvider();
   const textModel = getTextModel();
+  if (provider === "xai") {
+    const host = XAI_API_BASE_URL;
+    if (!getXaiApiKey()) {
+      return {
+        configured: false,
+        provider,
+        host,
+        textModel,
+        models: [],
+        message: "XAI_API_KEY is not set in the server environment. Add it to .env.local and restart FrameFlow.",
+      };
+    }
+    return { configured: true, provider, host, textModel, models: [textModel] };
+  }
   if (provider === "vllm") {
     const host = getVllmBaseUrl();
     try {
@@ -286,7 +352,192 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, initialDelay = 10
   throw new Error("Maximum retries exceeded");
 };
 
+interface InlineFile {
+  filename: string;
+  mimeType: string;
+  data: string;
+}
+
+const xaiHeaders = () => ({
+  Authorization: `Bearer ${getXaiApiKey()}`,
+  "Content-Type": "application/json",
+});
+
+const resolveXaiTextModel = (requested?: string): string => {
+  const fallback = getTextModel();
+  if (!requested || typeof requested !== "string") return fallback;
+  const value = requested.trim();
+  if (!value) return fallback;
+  // Ignore leftover Ollama tags if a client still has qwen2.5vl:7b in local state.
+  if (/^(qwen|llama|llava|minicpm|gemma|mistral)/i.test(value) || value.includes(":")) {
+    return fallback;
+  }
+  return value;
+};
+
+const uploadTemporaryFile = async (file: InlineFile): Promise<string> => {
+  const bytes = Buffer.from(file.data, "base64");
+  if (bytes.length > 48 * 1024 * 1024) throw new Error("Script attachment exceeds xAI's 48 MB file limit.");
+  const formData = new FormData();
+  formData.append("expires_after", "3600");
+  formData.append("purpose", "assistants");
+  formData.append("file", new Blob([new Uint8Array(bytes)], { type: file.mimeType || "application/octet-stream" }), file.filename || "script");
+  const response = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/files`, formData, {
+    headers: { Authorization: `Bearer ${getXaiApiKey()}` },
+    timeout: 120000,
+  }), 3, 1000);
+  if (!response.data?.id) throw new Error("xAI did not return an ID for the uploaded script.");
+  return response.data.id;
+};
+
+const deleteTemporaryFile = async (fileId: string) => {
+  try {
+    await axios.delete(`${XAI_API_BASE_URL}/files/${encodeURIComponent(fileId)}`, {
+      headers: { Authorization: `Bearer ${getXaiApiKey()}` },
+      timeout: 30000,
+    });
+  } catch (error: any) {
+    console.warn(`Could not immediately delete temporary xAI file ${fileId}: ${error.message}`);
+  }
+};
+
+const prepareInputFiles = async (input: any): Promise<{ input: any; uploadedIds: string[] }> => {
+  const cloned = structuredClone(input);
+  const uploadedIds: string[] = [];
+  if (!Array.isArray(cloned)) return { input: cloned, uploadedIds };
+
+  for (const message of cloned) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const part of message.content) {
+      if (part?.type !== "input_file") continue;
+      const inlineFile = part.inline_file as InlineFile | undefined;
+      if (!inlineFile) continue;
+      if (typeof inlineFile.data !== "string" || typeof inlineFile.filename !== "string") {
+        throw new Error("Invalid inline file attachment.");
+      }
+      const fileId = await uploadTemporaryFile(inlineFile);
+      uploadedIds.push(fileId);
+      part.file_id = fileId;
+      delete part.inline_file;
+    }
+  }
+  return { input: cloned, uploadedIds };
+};
+
+const toXaiChatMessages = (input: any, instructions?: string): any[] => {
+  const messages: any[] = [];
+  if (instructions) messages.push({ role: "system", content: instructions });
+  if (typeof input === "string") {
+    messages.push({ role: "user", content: input });
+    return messages;
+  }
+  if (!Array.isArray(input)) return messages;
+  for (const item of input) {
+    const role = item?.role || "user";
+    if (typeof item?.content === "string") {
+      messages.push({ role, content: item.content });
+      continue;
+    }
+    if (!Array.isArray(item?.content)) continue;
+    const content = item.content.map((part: any) => {
+      if (part?.type === "input_text" || part?.type === "text") {
+        return { type: "text", text: part.text || "" };
+      }
+      if (part?.type === "input_image" || part?.type === "image_url") {
+        const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
+        return { type: "image_url", image_url: { url, detail: part.detail || "high" } };
+      }
+      if (part?.type === "input_file" && part.file_id) {
+        return { type: "file", file: { file_id: part.file_id } };
+      }
+      return part;
+    });
+    messages.push({ role, content });
+  }
+  return messages;
+};
+
+export const generateXaiText = async (payload: any): Promise<string> => {
+  if (!getXaiApiKey()) {
+    throw new Error("XAI_API_KEY is not set in the server environment. Add it to .env.local and restart FrameFlow.");
+  }
+  const prepared = await prepareInputFiles(payload.input);
+  try {
+    const model = resolveXaiTextModel(payload.model);
+    const chatBody: any = {
+      model,
+      messages: toXaiChatMessages(prepared.input, payload.instructions),
+      temperature: typeof payload.temperature === "number" ? payload.temperature : 0.4,
+    };
+    if (payload.responseSchema) {
+      chatBody.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: payload.responseSchema.name,
+          schema: payload.responseSchema.schema,
+          strict: true,
+        },
+      };
+    }
+    try {
+      const chatResult = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/chat/completions`, chatBody, {
+        headers: xaiHeaders(),
+        timeout: 180000,
+      }));
+      return extractResponseText(chatResult.data);
+    } catch (chatError: any) {
+      if (chatError?.response?.status === 400 && payload.responseSchema) {
+        console.warn("json_schema rejected, retrying chat/completions as json_object");
+        const looseBody = { ...chatBody, response_format: { type: "json_object" } };
+        const loose = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/chat/completions`, looseBody, {
+          headers: xaiHeaders(),
+          timeout: 180000,
+        }));
+        return extractResponseText(loose.data);
+      }
+      throw chatError;
+    }
+  } finally {
+    await Promise.all(prepared.uploadedIds.map(deleteTemporaryFile));
+  }
+};
+
+export const generateXaiImage = async (payload: any): Promise<string> => {
+  if (!getXaiApiKey()) {
+    throw new Error("XAI_API_KEY is not set in the server environment. Add it to .env.local and restart FrameFlow.");
+  }
+  if (typeof payload.prompt !== "string" || !payload.prompt.trim()) throw new Error("Image prompt is required.");
+  const hasReference = typeof payload.referenceImage === "string" && payload.referenceImage.length > 0;
+  const endpoint = hasReference ? "images/edits" : "images/generations";
+  const body: any = {
+    model: getImageModel(),
+    prompt: payload.prompt,
+    response_format: "b64_json",
+    resolution: payload.resolution === "2k" ? "2k" : "1k",
+    aspect_ratio: payload.aspectRatio || "16:9",
+  };
+  if (hasReference) {
+    const imageUrl = payload.referenceImage.startsWith("data:")
+      ? payload.referenceImage
+      : `data:image/jpeg;base64,${payload.referenceImage}`;
+    body.image = { url: imageUrl, type: "image_url" };
+  }
+  const result = await withRetry(() => axios.post(`${XAI_API_BASE_URL}/${endpoint}`, body, {
+    headers: xaiHeaders(),
+    timeout: 360000,
+  }), 4, 2000);
+  const image = result.data?.data?.[0];
+  if (image?.b64_json) return `data:${image.mime_type || "image/jpeg"};base64,${image.b64_json}`;
+  if (image?.url) {
+    const downloaded = await axios.get(image.url, { responseType: "arraybuffer", timeout: 120000 });
+    const mimeType = downloaded.headers["content-type"] || image.mime_type || "image/jpeg";
+    return `data:${mimeType};base64,${Buffer.from(downloaded.data).toString("base64")}`;
+  }
+  throw new Error("xAI returned no generated image.");
+};
+
 export const generateLlmText = async (payload: any): Promise<string> => {
+  if (getLlmProvider() === "xai") return generateXaiText(payload);
   const provider = getLlmProvider();
   const model = payload.model || getTextModel();
   const temperature = typeof payload.temperature === "number" ? payload.temperature : 0.4;
@@ -393,3 +644,9 @@ export const generateLocalImage = async (payload: any): Promise<string> => {
   if (!b64) throw new Error("Automatic1111 returned no image.");
   return `data:image/png;base64,${stripDataUrl(b64)}`;
 };
+
+export const generateAnalysisImage = async (payload: any): Promise<string> => {
+  if (getLlmProvider() === "xai") return generateXaiImage(payload);
+  return generateLocalImage(payload);
+};
+

@@ -7,11 +7,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
 import {
+  generateAnalysisImage,
   generateLlmText,
-  generateLocalImage,
   getA1111Host,
   getImageModel,
+  getLlmProvider,
   getTextModel,
+  getXaiHost,
   probeLlm,
   publicLlmError,
 } from "./llmGateway";
@@ -222,14 +224,17 @@ async function startServer() {
   app.get("/api/health", async (_req, res) => {
     const llm = await probeLlm();
     const scenes = await sceneDetectorStatus();
-    const imageHost = getA1111Host();
+    const provider = getLlmProvider();
+    const providerLabel = provider === "xai" ? "xAI" : provider;
+    const imageHost = provider === "xai" ? getXaiHost() : getA1111Host();
+    const imageConfigured = provider === "xai" ? llm.configured : Boolean(imageHost);
     res.json({
       status: "ok",
-      provider: llm.provider,
+      provider: providerLabel,
       configured: llm.configured,
       host: llm.host,
       textModel: llm.textModel || getTextModel(),
-      imageConfigured: Boolean(imageHost),
+      imageConfigured,
       imageHost: imageHost || null,
       imageModel: getImageModel() || (imageHost ? "sdxl-or-flux" : null),
       models: llm.models,
@@ -239,7 +244,7 @@ async function startServer() {
   });
 
   // Same client contract as before: POST /api/xai { action, payload }.
-  // Backed by Ollama Qwen2.5-VL (laptop) or vLLM Qwen3-VL (GPU).
+  // xAI/Grok when XAI_API_KEY is set; otherwise local Ollama / vLLM.
   app.post("/api/xai", async (req, res) => {
     const { action, payload = {} } = req.body || {};
     try {
@@ -248,7 +253,7 @@ async function startServer() {
         return res.json({ text });
       }
       if (action === "generateImage") {
-        const image = await generateLocalImage(payload);
+        const image = await generateAnalysisImage(payload);
         return res.json({ image });
       }
       res.status(400).json({ error: "Invalid action" });
@@ -283,6 +288,13 @@ async function startServer() {
     }
   });
 
+
+  const smokeOk = (endpoint: string) => (_req: any, res: any) => {
+    res.json({ status: "ok", endpoint, method: "POST" });
+  };
+  app.get("/api/clip-health", smokeOk("clip-health"));
+  app.get("/api/platform-fit", smokeOk("platform-fit"));
+  app.get("/api/viral-judge", smokeOk("viral-judge"));
 
   app.post("/api/clip-health", (req, res) => {
     const body = req.body && typeof req.body === "object" ? req.body : {};

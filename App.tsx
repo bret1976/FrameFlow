@@ -152,7 +152,7 @@ const App: React.FC = () => {
     samplingInterval: 3, // Default 3 seconds
     shotMode: 'cuts',
     sceneThreshold: 27,
-    xaiModel: 'qwen2.5vl:7b',
+    xaiModel: 'grok-4.6',
     customInstructions: '',
     promptTemplate: '{{PROMPT}}' // Default template
   });
@@ -193,7 +193,7 @@ const App: React.FC = () => {
       await checkXaiConfiguration();
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Ollama is not running. Install it, pull qwen2.5vl:7b, and retry.';
+      const message = error instanceof Error ? error.message : 'xAI is not configured.';
       setGlobalError(message);
       alert(message);
       return false;
@@ -1236,17 +1236,17 @@ const App: React.FC = () => {
 
                         <div className="space-y-4">
                           <label className="text-[10px] font-bold text-neon uppercase tracking-widest flex items-center gap-2">
-                             03. Vision / Text Model
+                             03. Grok Vision / Text Model
                           </label>
                           <input
                             type="text"
                             className="w-full bg-transparent border border-white/10 p-4 text-sm text-white/80 focus:border-neon outline-none font-mono"
                             value={settings.xaiModel}
                             onChange={(e) => setSettings({ ...settings, xaiModel: e.target.value })}
-                            placeholder="qwen2.5vl:7b"
+                            placeholder="grok-4.6"
                           />
                           <p className="text-[9px] text-white/30 font-mono uppercase tracking-wider">
-                            Ollama: qwen2.5vl:7b or qwen2.5vl:3b. GPU/vLLM: Qwen3-VL 8B or 32B
+                            xAI Grok when XAI_API_KEY is set. Local fallback: Ollama qwen2.5vl:7b
                           </p>
                         </div>
                       </div>

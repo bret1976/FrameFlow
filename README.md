@@ -1,18 +1,16 @@
 # FrameFlow
 
-FrameFlow turns a video into shot-cut frames, uses a local vision model to write production prompts and shot metadata, and can build storyboards, remix narratives, and optionally generate stills with SDXL or Flux.
+FrameFlow turns a video into shot-cut frames, writes production prompts and shot metadata, and can build storyboards, remix narratives, and generate stills.
 
-The UI and browser frame split are unchanged. Analysis no longer uses Grok or xAI credits.
+Production uses **xAI/Grok** whenever `XAI_API_KEY` is set. Ollama (Qwen2.5-VL) is the local-only fallback when no xAI key is present.
 
 ## Stack
 
 - **Shot cuts:** PySceneDetect ContentDetector (HSV mean-abs-diff) in the browser. Optional server `/api/scenes` uses PySceneDetect if the `scenedetect` CLI is installed, otherwise ffmpeg scene scores.
-- **Per-frame prompt + shot type / angle / lighting:** [Qwen2.5-VL 7B](https://ollama.com/library/qwen2.5vl) on [Ollama](https://ollama.com) (laptop). On a GPU box, point at [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) 8B/32B via vLLM (`LLM_PROVIDER=vllm`).
-- **Story / remix text:** the same Qwen chat head (or any local model Ollama/vLLM serves).
-- **Optional stills:** Automatic1111 or Forge running Flux or SDXL (`A1111_HOST`).
-- **HTTP pattern:** the browser still `POST /api/xai` with `{ action, payload }`. The server sends the frame image and asks for JSON.
-
-App shape is closest to [byjlw/video-analyzer](https://github.com/byjlw/video-analyzer): local Ollama, image-in / JSON-out, no cloud key.
+- **Per-frame prompt + shot type / angle / lighting:** xAI Grok (`XAI_API_KEY`) in production. Local fallback: [Qwen2.5-VL 7B](https://ollama.com/library/qwen2.5vl) on [Ollama](https://ollama.com). GPU box: [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL) via vLLM when no xAI key is set.
+- **Story / remix text:** the same provider as frame analysis.
+- **Stills:** Grok image models when xAI is configured, otherwise Automatic1111 or Forge (`A1111_HOST`).
+- **HTTP pattern:** the browser still `POST /api/xai` with `{ action, payload }`.
 
 ## Run locally
 
