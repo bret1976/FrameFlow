@@ -30,6 +30,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 // Local imports
 import VideoUploader, { SAMPLE_VIDEOS, proxyVideoUrl } from './components/VideoUploader';
+import ViralJudgePanel from './components/ViralJudgePanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1341,6 +1342,7 @@ const App: React.FC = () => {
                   <div className="w-full max-w-xl p-2 bg-white/5 border border-white/10 rounded-[2rem]">
                     <VideoUploader onVideoSelected={handleVideoSelected} disabled={false} />
                   </div>
+                  <ViralJudgePanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">

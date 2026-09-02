@@ -16,6 +16,10 @@ import {
   publicLlmError,
 } from "./llmGateway";
 import { detectSceneTimestamps, detectScenesFromBuffer, sceneDetectorStatus } from "./sceneDetect";
+import { scoreClipHealth } from "./utils/clipHealth";
+import { parsePlatformFitRequest } from "./utils/platformFit";
+import { parseViralJudgeRequest } from "./utils/viralJudge";
+
 
 const execFileAsync = promisify(execFile);
 
@@ -277,6 +281,37 @@ async function startServer() {
       console.error("Scene detect error:", error?.message || error);
       res.status(502).json({ error: "Shot-cut detection failed. FrameFlow will fall back to browser cuts or interval sampling." });
     }
+  });
+
+
+  app.post("/api/clip-health", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const hasSamples = Array.isArray((body as any).samples) && (body as any).samples.length > 0;
+    const hasDiffs = Array.isArray((body as any).diffs) && (body as any).diffs.length > 0;
+    if (!hasSamples && !hasDiffs) {
+      return res.status(400).json({
+        error: "Send { samples: [{ timestamp, motion }, ...] } or { diffs: number[] }.",
+      });
+    }
+    res.json(scoreClipHealth(body as Record<string, unknown>));
+  });
+
+  app.post("/api/platform-fit", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parsePlatformFitRequest(body);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    res.json(parsed.report);
+  });
+
+  app.post("/api/viral-judge", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseViralJudgeRequest(body);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    res.json(parsed.report);
   });
 
   app.post('/api/storyboard-pdf', (req, res) => {
