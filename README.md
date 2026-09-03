@@ -89,6 +89,17 @@ npm start
 
 Production serves the built app and API from port `3000`. For Railway, set `OLLAMA_HOST` (or `VLLM_BASE_URL`) to a machine that actually runs the model. Railway's container does not run Ollama.
 
+## Agent Scrub
+
+`POST /api/agent-scrub` (GET smoke) exposes agent-style video scrub tools inspired by videoscrub:
+
+- `info` — ffprobe duration / size / fps / chapters / transcript status
+- `transcript` — embedded captions + optional query filter (Whisper optional; no invented keys)
+- `motion` — frame-difference scores over time buckets
+- `frames` — JPEG base64 thumbnails for a time range
+
+Requires ffmpeg/ffprobe on PATH (present in the Railway Dockerfile). UI: **Agent Scrub** panel on the home screen.
+
 ## Notes
 
 - Config → Shot Cuts uses scene detection; Interval is the older every-N-seconds path.

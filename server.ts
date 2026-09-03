@@ -21,6 +21,12 @@ import { detectSceneTimestamps, detectScenesFromBuffer, sceneDetectorStatus } fr
 import { scoreClipHealth } from "./utils/clipHealth";
 import { parsePlatformFitRequest } from "./utils/platformFit";
 import { parseViralJudgeRequest } from "./utils/viralJudge";
+import {
+  checkMediaTools,
+  mediaToolsMissingMessage,
+  parseAgentScrubRequest,
+  runAgentScrub,
+} from "./utils/agentScrub";
 
 
 const execFileAsync = promisify(execFile);
@@ -324,6 +330,37 @@ async function startServer() {
       return res.status(400).json({ error: parsed.error });
     }
     res.json(parsed.report);
+  });
+
+  app.get("/api/agent-scrub", smokeOk("agent-scrub"));
+
+  app.post("/api/agent-scrub", async (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseAgentScrubRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const tools = await checkMediaTools();
+      if (!tools.ffmpeg || !tools.ffprobe) {
+        return res.status(501).json({
+          error: mediaToolsMissingMessage(),
+          ffmpeg: tools.ffmpeg,
+          ffprobe: tools.ffprobe,
+        });
+      }
+      const result = await runAgentScrub(parsed.request, async (url) => {
+        const target = needsPlatformResolver(url) ? await resolvePlayableUrl(url) : url;
+        return target;
+      });
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 502;
+      console.error("Agent scrub error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "Agent scrub failed.",
+      });
+    }
   });
 
   app.post('/api/storyboard-pdf', (req, res) => {
