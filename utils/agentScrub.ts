@@ -156,22 +156,63 @@ export const prepareScrubSource = async (
         playable = trimmed;
       }
     }
-    // Prefer a temp download for stability (range seeks / motion sampling).
+    // Prefer a Node fetch download so ffprobe always sees a local file.
+    // Railway's ffmpeg/ffprobe often cannot probe remote http(s) URLs.
     const dir = await mkdtemp(path.join(os.tmpdir(), "frameflow-scrub-"));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));
     const outPath = path.join(dir, "source.mp4");
+    const MAX_BYTES = 80 * 1024 * 1024;
+
+    const downloadWithFetch = async (url: string): Promise<void> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const res = await fetch(url, {
+          redirect: "follow",
+          signal: controller.signal,
+          headers: { "User-Agent": "FrameFlow-AgentScrub/1.0" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} downloading source`);
+        const lenHeader = res.headers.get("content-length");
+        if (lenHeader && Number(lenHeader) > MAX_BYTES) {
+          throw new Error("Source download is limited to 80 MB.");
+        }
+        if (!res.body) throw new Error("Empty response body");
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          total += value.byteLength;
+          if (total > MAX_BYTES) throw new Error("Source download is limited to 80 MB.");
+          chunks.push(value);
+        }
+        await writeFile(outPath, Buffer.concat(chunks.map((c) => Buffer.from(c))));
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     try {
-      await execFileAsync(
-        "ffmpeg",
-        ["-hide_banner", "-y", "-i", playable, "-c", "copy", "-movflags", "+faststart", outPath],
-        { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
-      );
+      await downloadWithFetch(playable);
       return { input: outPath, cleanup };
     } catch {
-      // Fall back to letting ffmpeg read the URL directly (no local copy).
-      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
-      cleanups.length = 0;
-      return { input: playable, cleanup };
+      // Secondary: ffmpeg -i URL -c copy into the same temp path.
+      try {
+        await execFileAsync(
+          "ffmpeg",
+          ["-hide_banner", "-y", "-i", playable, "-c", "copy", "-movflags", "+faststart", outPath],
+          { timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+        );
+        return { input: outPath, cleanup };
+      } catch {
+        // Last resort: raw URL (may fail on Railway when ffprobe cannot reach remote URLs).
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        cleanups.length = 0;
+        return { input: playable, cleanup };
+      }
     }
   }
 
