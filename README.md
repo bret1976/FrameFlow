@@ -100,6 +100,17 @@ Production serves the built app and API from port `3000`. For Railway, set `OLLA
 
 Requires ffmpeg/ffprobe on PATH (present in the Railway Dockerfile). UI: **Agent Scrub** panel on the home screen.
 
+## Reel EDL
+
+`POST /api/reel-edl` (GET smoke) builds a typed, JSON-ready reel edit decision list inspired by EdiDoctor:
+
+- `silence` — detects quiet gaps with ffmpeg, returns keep ranges and time saved
+- `build` — validates caller-supplied keep ranges into the same EDL contract
+- Produces proxy (540×960) and final (1080×1920) ffmpeg cut commands from one EDL
+- Never overwrites the source; remote media is downloaded into a temporary working copy
+
+UI: **Reel EDL** panel on the home screen. No model key is required.
+
 ## Notes
 
 - Config → Shot Cuts uses scene detection; Interval is the older every-N-seconds path.

@@ -32,6 +32,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import VideoUploader, { SAMPLE_VIDEOS, proxyVideoUrl } from './components/VideoUploader';
 import ViralJudgePanel from './components/ViralJudgePanel';
 import AgentScrubPanel from './components/AgentScrubPanel';
+import ReelEdlPanel from './components/ReelEdlPanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1345,6 +1346,7 @@ const App: React.FC = () => {
                   </div>
                   <ViralJudgePanel />
                   <AgentScrubPanel />
+                  <ReelEdlPanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">

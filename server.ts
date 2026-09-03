@@ -27,6 +27,10 @@ import {
   parseAgentScrubRequest,
   runAgentScrub,
 } from "./utils/agentScrub";
+import {
+  parseReelEdlRequest,
+  runReelEdl,
+} from "./utils/reelEdl";
 
 
 const execFileAsync = promisify(execFile);
@@ -330,6 +334,37 @@ async function startServer() {
       return res.status(400).json({ error: parsed.error });
     }
     res.json(parsed.report);
+  });
+
+  app.get("/api/reel-edl", smokeOk("reel-edl"));
+
+  app.post("/api/reel-edl", async (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseReelEdlRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const tools = await checkMediaTools();
+      if (!tools.ffmpeg || !tools.ffprobe) {
+        return res.status(501).json({
+          error: mediaToolsMissingMessage(),
+          ffmpeg: tools.ffmpeg,
+          ffprobe: tools.ffprobe,
+        });
+      }
+      const result = await runReelEdl(parsed.request, async (url) => {
+        const target = needsPlatformResolver(url) ? await resolvePlayableUrl(url) : url;
+        return target;
+      });
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 502;
+      console.error("Reel EDL error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "Reel EDL failed.",
+      });
+    }
   });
 
   app.get("/api/agent-scrub", smokeOk("agent-scrub"));
