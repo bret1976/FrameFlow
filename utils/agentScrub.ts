@@ -170,7 +170,11 @@ export const prepareScrubSource = async (
         const res = await fetch(url, {
           redirect: "follow",
           signal: controller.signal,
-          headers: { "User-Agent": "FrameFlow-AgentScrub/1.0" },
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            Accept: "*/*",
+          },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status} downloading source`);
         const lenHeader = res.headers.get("content-length");
@@ -195,10 +199,12 @@ export const prepareScrubSource = async (
       }
     };
 
+    let fetchErr: unknown = null;
     try {
       await downloadWithFetch(playable);
       return { input: outPath, cleanup };
-    } catch {
+    } catch (err) {
+      fetchErr = err;
       // Secondary: ffmpeg -i URL -c copy into the same temp path.
       try {
         await execFileAsync(
@@ -208,10 +214,15 @@ export const prepareScrubSource = async (
         );
         return { input: outPath, cleanup };
       } catch {
-        // Last resort: raw URL (may fail on Railway when ffprobe cannot reach remote URLs).
+        // Do not return the raw remote URL — Railway ffprobe cannot probe http(s).
+        // Surface the download failure so callers get a clear error.
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
         cleanups.length = 0;
-        return { input: playable, cleanup };
+        const msg =
+          fetchErr instanceof Error
+            ? fetchErr.message
+            : "Failed to download http(s) source for scrub.";
+        throw new Error(`Could not download source for local ffprobe: ${msg}`);
       }
     }
   }
