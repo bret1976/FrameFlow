@@ -35,6 +35,10 @@ import {
   parseCueSpliceRequest,
   runCueSplice,
 } from "./utils/cueSplice";
+import {
+  parseStickyCueRequest,
+  runStickyCue,
+} from "./utils/stickyCue";
 
 
 const execFileAsync = promisify(execFile);
@@ -390,6 +394,26 @@ async function startServer() {
       });
     }
   });
+
+  app.get("/api/sticky-cue", smokeOk("sticky-cue"));
+
+  app.post("/api/sticky-cue", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseStickyCueRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runStickyCue(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("StickyCue error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "StickyCue failed.",
+      });
+    }
+  });
+
 
   app.get("/api/agent-scrub", smokeOk("agent-scrub"));
 
