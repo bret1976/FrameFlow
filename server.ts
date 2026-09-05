@@ -31,6 +31,10 @@ import {
   parseReelEdlRequest,
   runReelEdl,
 } from "./utils/reelEdl";
+import {
+  parseCueSpliceRequest,
+  runCueSplice,
+} from "./utils/cueSplice";
 
 
 const execFileAsync = promisify(execFile);
@@ -363,6 +367,26 @@ async function startServer() {
       console.error("Reel EDL error:", error?.message || error);
       return res.status(status).json({
         error: typeof error?.message === "string" ? error.message : "Reel EDL failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/cue-splice", smokeOk("cue-splice"));
+
+  app.post("/api/cue-splice", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseCueSpliceRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runCueSplice(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("CueSplice error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "CueSplice failed.",
       });
     }
   });
