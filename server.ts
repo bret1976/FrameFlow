@@ -43,6 +43,10 @@ import {
   parseReviewFactoryRequest,
   runReviewFactory,
 } from "./utils/reviewFactory";
+import {
+  parseFormatBoardRequest,
+  runFormatBoard,
+} from "./utils/formatBoard";
 
 
 const execFileAsync = promisify(execFile);
@@ -436,6 +440,26 @@ async function startServer() {
       console.error("ReviewFactory error:", error?.message || error);
       return res.status(status).json({
         error: typeof error?.message === "string" ? error.message : "ReviewFactory failed.",
+      });
+    }
+  });
+
+  app.get("/api/format-board", smokeOk("format-board"));
+
+  app.post("/api/format-board", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseFormatBoardRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runFormatBoard(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      console.error("FormatBoard error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "FormatBoard failed.",
       });
     }
   });
