@@ -39,6 +39,10 @@ import {
   parseStickyCueRequest,
   runStickyCue,
 } from "./utils/stickyCue";
+import {
+  parseReviewFactoryRequest,
+  runReviewFactory,
+} from "./utils/reviewFactory";
 
 
 const execFileAsync = promisify(execFile);
@@ -414,6 +418,27 @@ async function startServer() {
     }
   });
 
+
+
+  app.get("/api/review-factory", smokeOk("review-factory"));
+
+  app.post("/api/review-factory", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseReviewFactoryRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runReviewFactory(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      console.error("ReviewFactory error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "ReviewFactory failed.",
+      });
+    }
+  });
 
   app.get("/api/agent-scrub", smokeOk("agent-scrub"));
 
