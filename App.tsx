@@ -37,6 +37,7 @@ import CueSplicePanel from './components/CueSplicePanel';
 import StickyCuePanel from './components/StickyCuePanel';
 import ReviewFactoryPanel from './components/ReviewFactoryPanel';
 import FormatBoardPanel from './components/FormatBoardPanel';
+import MomentRankPanel from './components/MomentRankPanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1355,6 +1356,7 @@ const App: React.FC = () => {
                   <StickyCuePanel />
                   <ReviewFactoryPanel />
                   <FormatBoardPanel />
+                  <MomentRankPanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">
