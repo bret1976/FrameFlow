@@ -51,6 +51,10 @@ import {
   parseMomentRankRequest,
   runMomentRank,
 } from "./utils/momentRank";
+import {
+  parseShortFrameRequest,
+  runShortFrame,
+} from "./utils/shortFrame";
 
 
 const execFileAsync = promisify(execFile);
@@ -464,6 +468,26 @@ async function startServer() {
       console.error("FormatBoard error:", error?.message || error);
       return res.status(status).json({
         error: typeof error?.message === "string" ? error.message : "FormatBoard failed.",
+      });
+    }
+  });
+
+  app.get("/api/short-frame", smokeOk("short-frame"));
+
+  app.post("/api/short-frame", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseShortFrameRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runShortFrame(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      console.error("ShortFrame error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "ShortFrame failed.",
       });
     }
   });
