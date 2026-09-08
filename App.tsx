@@ -38,6 +38,7 @@ import StickyCuePanel from './components/StickyCuePanel';
 import ReviewFactoryPanel from './components/ReviewFactoryPanel';
 import FormatBoardPanel from './components/FormatBoardPanel';
 import ShortFramePanel from './components/ShortFramePanel';
+import ReelBeatPanel from './components/ReelBeatPanel';
 import MomentRankPanel from './components/MomentRankPanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
@@ -1358,6 +1359,7 @@ const App: React.FC = () => {
                   <ReviewFactoryPanel />
                   <FormatBoardPanel />
                   <ShortFramePanel />
+                  <ReelBeatPanel />
                   <MomentRankPanel />
                 </motion.div>
               ) : (

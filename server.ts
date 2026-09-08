@@ -55,6 +55,10 @@ import {
   parseShortFrameRequest,
   runShortFrame,
 } from "./utils/shortFrame";
+import {
+  parseReelBeatRequest,
+  runReelBeat,
+} from "./utils/reelBeat";
 
 
 const execFileAsync = promisify(execFile);
@@ -492,7 +496,28 @@ async function startServer() {
     }
   });
 
-  app.get("/api/moment-rank", smokeOk("moment-rank"));
+  
+  app.get("/api/reel-beat", smokeOk("reel-beat"));
+
+  app.post("/api/reel-beat", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseReelBeatRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runReelBeat(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      const status = Number(error?.status) || 500;
+      console.error("ReelBeat error:", error?.message || error);
+      return res.status(status).json({
+        error: typeof error?.message === "string" ? error.message : "ReelBeat failed.",
+      });
+    }
+  });
+
+app.get("/api/moment-rank", smokeOk("moment-rank"));
 
   app.post("/api/moment-rank", (req, res) => {
     const body = req.body && typeof req.body === "object" ? req.body : {};
