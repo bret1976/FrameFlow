@@ -63,6 +63,10 @@ import {
   parseEndingCoherenceRequest,
   runEndingCoherence,
 } from "./utils/endingCoherence";
+import {
+  parseDeliveryGateRequest,
+  runDeliveryGate,
+} from "./utils/deliveryGate";
 
 
 const execFileAsync = promisify(execFile);
@@ -560,6 +564,27 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       });
     }
   });
+
+
+  app.get("/api/delivery-gate", smokeOk("delivery-gate"));
+
+  app.post("/api/delivery-gate", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseDeliveryGateRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runDeliveryGate(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("DeliveryGate error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "DeliveryGate failed.",
+      });
+    }
+  });
+
 
   app.get("/api/agent-scrub", smokeOk("agent-scrub"));
 
