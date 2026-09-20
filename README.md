@@ -127,3 +127,13 @@ After frame analysis, FrameFlow runs a local verify pass (no extra API keys) and
 - Shot inventory / EDL — timestamped shot list as `frameflow-packet.json` plus `frameflow-edl.md`
 
 Use **Verify** to reopen the report, **Lock Passport** to stamp it into Config (`{{PASSPORT}}` + directives), and **Export Packet** to download JSON + markdown. Re-run analysis after locking so every prompt carries the same identity block.
+
+
+## Ending Coherence
+
+`POST /api/ending-coherence` (GET smoke) is a cold-viewer story gate inspired by Cutawan's editorial-coherence study (MIT ideas only, reimplemented):
+
+- Detects unresolved endings, mid-sentence cuts, dangling connectives, open quotes, trailing filler
+- Returns PASS / WARN / FAIL with an evidence quote
+- Suggests a sentence-boundary extend (`suggested.end_sec`) when the cut is incomplete
+- Pure heuristics — no LLM keys
