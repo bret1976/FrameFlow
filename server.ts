@@ -71,6 +71,10 @@ import {
   parseSilenceGateRequest,
   runSilenceGate,
 } from "./utils/silenceGate";
+import {
+  parsePromoteGateRequest,
+  runPromoteGate,
+} from "./utils/promoteGate";
 
 
 const execFileAsync = promisify(execFile);
@@ -605,6 +609,26 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("SilenceGate error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "SilenceGate failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/promote-gate", smokeOk("promote-gate"));
+
+  app.post("/api/promote-gate", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parsePromoteGateRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runPromoteGate(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("PromoteGate error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "PromoteGate failed.",
       });
     }
   });
