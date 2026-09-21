@@ -67,6 +67,10 @@ import {
   parseDeliveryGateRequest,
   runDeliveryGate,
 } from "./utils/deliveryGate";
+import {
+  parseSilenceGateRequest,
+  runSilenceGate,
+} from "./utils/silenceGate";
 
 
 const execFileAsync = promisify(execFile);
@@ -581,6 +585,26 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("DeliveryGate error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "DeliveryGate failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/silence-gate", smokeOk("silence-gate"));
+
+  app.post("/api/silence-gate", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseSilenceGateRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      const result = runSilenceGate(parsed.request);
+      return res.json(result);
+    } catch (error: any) {
+      console.error("SilenceGate error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "SilenceGate failed.",
       });
     }
   });

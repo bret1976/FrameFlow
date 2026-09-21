@@ -42,6 +42,7 @@ import ReelBeatPanel from './components/ReelBeatPanel';
 import MomentRankPanel from './components/MomentRankPanel';
 import EndingCoherencePanel from './components/EndingCoherencePanel';
 import DeliveryGatePanel from './components/DeliveryGatePanel';
+import SilenceGatePanel from './components/SilenceGatePanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1365,6 +1366,7 @@ const App: React.FC = () => {
                   <MomentRankPanel />
                   <EndingCoherencePanel />
                   <DeliveryGatePanel />
+                  <SilenceGatePanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">

@@ -137,3 +137,7 @@ Use **Verify** to reopen the report, **Lock Passport** to stamp it into Config (
 - Returns PASS / WARN / FAIL with an evidence quote
 - Suggests a sentence-boundary extend (`suggested.end_sec`) when the cut is incomplete
 - Pure heuristics — no LLM keys
+
+`POST /api/silence-gate` (GET smoke) is a dead-air / keep-range planner inspired by WVideoFlow's Smart Silence Removal (MIT ideas only, reimplemented):
+thresholds −35 dB / 0.7s min / 0.15s pad, silence gaps → keep ranges + ffmpeg filter hint. Pure JSON, no keys.
+
