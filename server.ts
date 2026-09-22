@@ -79,6 +79,10 @@ import {
   parseTopicTileRequest,
   runTopicTile,
 } from "./utils/topicTile";
+import {
+  parseSafeKitRequest,
+  runSafeKit,
+} from "./utils/safeKit";
 
 
 const execFileAsync = promisify(execFile);
@@ -632,6 +636,25 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("TopicTile error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "TopicTile failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/safe-kit", smokeOk("safe-kit"));
+
+  app.post("/api/safe-kit", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseSafeKitRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(runSafeKit(parsed.request));
+    } catch (error: any) {
+      console.error("SafeKit error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "SafeKit failed.",
       });
     }
   });
