@@ -40,6 +40,7 @@ import FormatBoardPanel from './components/FormatBoardPanel';
 import ShortFramePanel from './components/ShortFramePanel';
 import ReelBeatPanel from './components/ReelBeatPanel';
 import MomentRankPanel from './components/MomentRankPanel';
+import TopicTilePanel from './components/TopicTilePanel';
 import EndingCoherencePanel from './components/EndingCoherencePanel';
 import DeliveryGatePanel from './components/DeliveryGatePanel';
 import SilenceGatePanel from './components/SilenceGatePanel';
@@ -1365,6 +1366,7 @@ const App: React.FC = () => {
                   <ShortFramePanel />
                   <ReelBeatPanel />
                   <MomentRankPanel />
+                  <TopicTilePanel />
                   <EndingCoherencePanel />
                   <DeliveryGatePanel />
                   <SilenceGatePanel />
