@@ -338,7 +338,11 @@ export function wrapLine(text: string, maxLen: number): string {
 }
 
 export function generateSrt(text: string, options: SrtOptions = {}): string {
-  const cfg = { ...DEFAULT_SRT, ...options };
+  const cfg: Required<SrtOptions> = {
+    wordsPerCaption: options.wordsPerCaption ?? DEFAULT_SRT.wordsPerCaption,
+    maxLineLength: options.maxLineLength ?? DEFAULT_SRT.maxLineLength,
+    wordsPerMinute: options.wordsPerMinute ?? DEFAULT_SRT.wordsPerMinute,
+  };
   if (cfg.wordsPerCaption <= 0) throw new RangeError("wordsPerCaption must be positive");
   if (cfg.wordsPerMinute <= 0) throw new RangeError("wordsPerMinute must be positive");
   if (cfg.maxLineLength <= 0) throw new RangeError("maxLineLength must be positive");
