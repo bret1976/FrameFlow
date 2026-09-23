@@ -141,3 +141,14 @@ Use **Verify** to reopen the report, **Lock Passport** to stamp it into Config (
 `POST /api/silence-gate` (GET smoke) is a dead-air / keep-range planner inspired by WVideoFlow's Smart Silence Removal (MIT ideas only, reimplemented):
 thresholds −35 dB / 0.7s min / 0.15s pad, silence gaps → keep ranges + ffmpeg filter hint. Pure JSON, no keys.
 
+## FinishKit
+
+`POST /api/finish-kit` (GET smoke) is a feed-ready finish planner inspired by reelsmith/reelkit (MIT ideas only, reimplemented):
+
+- Checklist: 1080×1920, duration ≤180s, −14±1 LUFS, true peak ≤ −1.5 dBTP, clean metadata, faststart, H.264/yuv420p
+- Pipeline + ffmpeg command templates: vertical cover-crop (optional punch-in), two-pass loudnorm, strip, faststart, cover thumb
+- Actions: `check` | `plan` | `commands` | `demo` | `defaults` — pure JSON, no API keys
+- Complements SafeKit (UI zones) and PromoteGate (−16 promote loudness); does not replace them
+
+UI: **FinishKit** panel on the home screen.
+
