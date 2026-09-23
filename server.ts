@@ -87,6 +87,10 @@ import {
   parseFinishKitRequest,
   runFinishKit,
 } from "./utils/finishKit";
+import {
+  parseHookBankRequest,
+  runHookBank,
+} from "./utils/hookBank";
 
 
 const execFileAsync = promisify(execFile);
@@ -678,6 +682,25 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("FinishKit error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "FinishKit failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/hook-bank", smokeOk("hook-bank"));
+
+  app.post("/api/hook-bank", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseHookBankRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(runHookBank(parsed.request));
+    } catch (error: any) {
+      console.error("HookBank error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "HookBank failed.",
       });
     }
   });

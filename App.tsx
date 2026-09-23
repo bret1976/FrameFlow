@@ -47,6 +47,7 @@ import SilenceGatePanel from './components/SilenceGatePanel';
 import PromoteGatePanel from './components/PromoteGatePanel';
 import SafeKitPanel from './components/SafeKitPanel';
 import FinishKitPanel from './components/FinishKitPanel';
+import HookBankPanel from './components/HookBankPanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1375,6 +1376,7 @@ const App: React.FC = () => {
                   <PromoteGatePanel />
                   <SafeKitPanel />
                   <FinishKitPanel />
+                  <HookBankPanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">
