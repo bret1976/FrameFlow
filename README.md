@@ -152,3 +152,17 @@ thresholds −35 dB / 0.7s min / 0.15s pad, silence gaps → keep ranges + ffmpe
 
 UI: **FinishKit** panel on the home screen.
 
+## CapCutGate
+
+`POST /api/cap-cut-gate` (GET smoke) is a CapCut draft / export handoff checklist inspired by Hao0321/video-autopilot-kit (MIT ideas only, reimplemented):
+
+- Platform-aware duration bands (YT Shorts dead zone 26–44s does not apply to IG/TikTok)
+- First cut ≤2s, 9:16 canvas, CapCut-friendly FPS, named draft, caption handoff (SRT/ASS/burned/auto)
+- Export preset 1080p+, watermark-risk flag, template intent, optional loop-seam
+- Actions: `check` | `plan` | `demo` | `checklist` | `defaults` — pure JSON, no API keys
+- Complements FinishKit (ffmpeg finish) and DeliveryGate (publish meta); does not replace them
+
+UI: **CapCutGate** panel on the home screen.
+
+
+

@@ -49,6 +49,7 @@ import SafeKitPanel from './components/SafeKitPanel';
 import FinishKitPanel from './components/FinishKitPanel';
 import HookBankPanel from './components/HookBankPanel';
 import PairPackPanel from './components/PairPackPanel';
+import CapCutGatePanel from './components/CapCutGatePanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1379,6 +1380,7 @@ const App: React.FC = () => {
                   <FinishKitPanel />
                   <HookBankPanel />
                   <PairPackPanel />
+                  <CapCutGatePanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">

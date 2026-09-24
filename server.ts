@@ -95,6 +95,10 @@ import {
   parsePairPackRequest,
   runPairPack,
 } from "./utils/pairPack";
+import {
+  parseCapCutGateRequest,
+  runCapCutGate,
+} from "./utils/capCutGate";
 
 
 const execFileAsync = promisify(execFile);
@@ -728,6 +732,25 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
     }
   });
 
+
+
+  app.get("/api/cap-cut-gate", smokeOk("cap-cut-gate"));
+
+  app.post("/api/cap-cut-gate", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseCapCutGateRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(runCapCutGate(parsed.request));
+    } catch (error: any) {
+      console.error("CapCutGate error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "CapCutGate failed.",
+      });
+    }
+  });
 
   app.get("/api/promote-gate", smokeOk("promote-gate"));
 
