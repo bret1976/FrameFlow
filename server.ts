@@ -91,6 +91,10 @@ import {
   parseHookBankRequest,
   runHookBank,
 } from "./utils/hookBank";
+import {
+  parsePairPackRequest,
+  runPairPack,
+} from "./utils/pairPack";
 
 
 const execFileAsync = promisify(execFile);
@@ -701,6 +705,25 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("HookBank error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "HookBank failed.",
+      });
+    }
+  });
+
+
+  app.get("/api/pair-pack", smokeOk("pair-pack"));
+
+  app.post("/api/pair-pack", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parsePairPackRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(runPairPack(parsed.request));
+    } catch (error: any) {
+      console.error("PairPack error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "PairPack failed.",
       });
     }
   });
