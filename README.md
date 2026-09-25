@@ -164,5 +164,15 @@ UI: **FinishKit** panel on the home screen.
 
 UI: **CapCutGate** panel on the home screen.
 
+## StylePack
 
+`POST /api/style-pack` (GET smoke) is an ASS caption style catalog + burn-in readiness checklist inspired by muneebkhan08/Capite (MIT ideas only, reimplemented):
+
+- 12 original FrameFlow styles across trending / clean_tech / editorial / pop
+- Animation modes: highlight, karaoke, scale, bounce, pop, glow, box
+- Gates: style selected, ASS/burned export, outline ≥3.5px, contrast, MarginV 180–420, font fallback, 9:16 canvas, word timing, line budget
+- Actions: `check` | `pick` | `plan` | `list` | `styles` | `demo` | `defaults` — pure JSON, no API keys
+- Complements SafeKit (UI zones), StickyCue (timing), CapCutGate (draft handoff); does not replace them
+
+UI: **StylePack** panel on the home screen.
 
