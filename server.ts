@@ -103,6 +103,10 @@ import {
   parseStylePackRequest,
   runStylePack,
 } from "./utils/stylePack";
+import {
+  parseTempoPackRequest,
+  runTempoPack,
+} from "./utils/tempoPack";
 
 
 const execFileAsync = promisify(execFile);
@@ -770,6 +774,24 @@ app.get("/api/moment-rank", smokeOk("moment-rank"));
       console.error("StylePack error:", error?.message || error);
       return res.status(500).json({
         error: typeof error?.message === "string" ? error.message : "StylePack failed.",
+      });
+    }
+  });
+
+  app.get("/api/tempo-pack", smokeOk("tempo-pack"));
+
+  app.post("/api/tempo-pack", (req, res) => {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const parsed = parseTempoPackRequest(body as Record<string, unknown>);
+    if (parsed.ok === false) {
+      return res.status(400).json({ error: parsed.error });
+    }
+    try {
+      return res.json(runTempoPack(parsed.request));
+    } catch (error: any) {
+      console.error("TempoPack error:", error?.message || error);
+      return res.status(500).json({
+        error: typeof error?.message === "string" ? error.message : "TempoPack failed.",
       });
     }
   });

@@ -51,6 +51,7 @@ import HookBankPanel from './components/HookBankPanel';
 import PairPackPanel from './components/PairPackPanel';
 import CapCutGatePanel from './components/CapCutGatePanel';
 import StylePackPanel from './components/StylePackPanel';
+import TempoPackPanel from './components/TempoPackPanel';
 import FrameCard from './components/FrameCard';
 import StoryboardView from './components/StoryboardView';
 import { extractFramesFromVideo, extractShotFramesFromVideo } from './utils/videoProcessor';
@@ -1383,6 +1384,7 @@ const App: React.FC = () => {
                   <PairPackPanel />
                   <CapCutGatePanel />
                   <StylePackPanel />
+                  <TempoPackPanel />
                 </motion.div>
               ) : (
                         <div className="grid lg:grid-cols-[1fr_460px] gap-12">
