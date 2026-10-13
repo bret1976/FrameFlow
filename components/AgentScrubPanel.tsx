@@ -35,8 +35,8 @@ const AgentScrubPanel: React.FC = () => {
   const [source, setSource] = useState('');
   const [query, setQuery] = useState('');
   const [startS, setStartS] = useState('0');
-  const [endS, setEndS] = useState('8');
-  const [fps, setFps] = useState('1');
+  const [endS, setEndS] = useState('');
+  const [fps, setFps] = useState('0.2');
   const [loading, setLoading] = useState<ScrubAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScrubResult | null>(null);

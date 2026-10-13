@@ -505,65 +505,66 @@ const runMotion = async (
   };
 };
 
+const FRAME_INTERVAL_S = 5;
+
 const runFrames = async (
   input: string,
   opts: { start_s?: number; end_s?: number; fps?: number; width?: number },
 ): Promise<AgentScrubResult> => {
   const probe = await probeJson(input);
   const duration = Number(probe.format?.duration);
-  const start = clampNum(opts.start_s, 0, 0, Number.isFinite(duration) ? duration : 1e9);
-  let end = clampNum(
-    opts.end_s,
-    Number.isFinite(duration) ? Math.min(duration, start + 8) : start + 8,
-    start + 0.05,
-    Number.isFinite(duration) ? duration : start + 120,
-  );
-  const fps = clampNum(opts.fps, 1, 0.2, 8);
+  const hasDuration = Number.isFinite(duration) && duration > 0;
+  const start = clampNum(opts.start_s, 0, 0, hasDuration ? duration : 1e9);
+  // Default to the ENTIRE video (no duration cap); an explicit end_s is still honored.
+  const end = hasDuration
+    ? clampNum(opts.end_s, duration, start + 0.05, duration)
+    : clampNum(opts.end_s, start + 600, start + 0.05, 1e9);
+  // Always one frame every 5 seconds: start, start+5, ... through the last segment.
+  const interval = FRAME_INTERVAL_S;
   const width = clampNum(opts.width, 320, 64, 1280);
-  const maxFrames = 48;
   const span = end - start;
-  const expected = Math.ceil(span * fps);
-  const effectiveFps = expected > maxFrames ? maxFrames / span : fps;
+  const count = Math.max(1, Math.ceil(span / interval - 1e-9));
+  const times: number[] = [];
+  for (let i = 0; i < count; i++) times.push(start + i * interval);
 
   const dir = await mkdtemp(path.join(os.tmpdir(), "frameflow-frames-"));
   try {
-    const pattern = path.join(dir, "frame_%03d.jpg");
-    await execFileAsync(
-      "ffmpeg",
-      [
-        "-hide_banner",
-        "-y",
-        "-ss", String(start),
-        "-to", String(end),
-        "-i", input,
-        "-an",
-        "-vf", `fps=${effectiveFps},scale=${width}:-1`,
-        "-frames:v", String(maxFrames),
-        "-q:v", "5",
-        pattern,
-      ],
-      { timeout: 120000, maxBuffer: 8 * 1024 * 1024 },
-    );
-
-    const frames: { t_s: number; mime: string; base64: string }[] = [];
-    for (let i = 1; i <= maxFrames; i++) {
-      const filePath = path.join(dir, `frame_${String(i).padStart(3, "0")}.jpg`);
-      if (!(await pathExists(filePath))) break;
+    const grab = async (t: number, idx: number) => {
+      const filePath = path.join(dir, `frame_${String(idx).padStart(5, "0")}.jpg`);
+      // Seeking right at EOF can yield nothing; nudge the very last grab inside the stream.
+      const seek = hasDuration ? Math.max(0, Math.min(t, duration - 0.1)) : t;
+      try {
+        await execFileAsync(
+          "ffmpeg",
+          ["-hide_banner", "-y", "-ss", String(seek), "-i", input, "-an",
+            "-frames:v", "1", "-vf", `scale=${width}:-2`, "-q:v", "5", filePath],
+          { timeout: 60000, maxBuffer: 8 * 1024 * 1024 },
+        );
+      } catch {
+        /* missing frame is skipped below */
+      }
+      if (!(await pathExists(filePath))) return null;
       const buf = await readFile(filePath);
-      const t = start + (i - 1) / effectiveFps;
-      frames.push({
-        t_s: Math.round(t * 1000) / 1000,
-        mime: "image/jpeg",
-        base64: buf.toString("base64"),
-      });
-    }
+      return { t_s: Math.round(t * 1000) / 1000, mime: "image/jpeg", base64: buf.toString("base64") };
+    };
+
+    const results: ({ t_s: number; mime: string; base64: string } | null)[] = new Array(times.length).fill(null);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(4, times.length) }, async () => {
+      while (next < times.length) {
+        const i = next++;
+        results[i] = await grab(times[i], i);
+      }
+    });
+    await Promise.all(workers);
+    const frames = results.filter((f): f is { t_s: number; mime: string; base64: string } => f !== null);
 
     return {
       ok: true,
       action: "frames",
       start_s: start,
       end_s: end,
-      fps: Math.round(effectiveFps * 1000) / 1000,
+      fps: Math.round((1 / interval) * 1000) / 1000,
       frames,
       message: frames.length === 0 ? "No frames extracted for that range." : undefined,
     };
