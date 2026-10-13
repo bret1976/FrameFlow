@@ -123,7 +123,12 @@ const App: React.FC = () => {
   // Persistence
   useEffect(() => {
     if (frames.length > 0) {
-      localStorage.setItem('frameflow-frames', JSON.stringify(frames));
+      try {
+        localStorage.setItem('frameflow-frames', JSON.stringify(frames));
+      } catch (e) {
+        // Long videos can exceed the storage quota; never let that break analysis.
+        console.warn('Skipping frame persistence (storage quota):', e);
+      }
     }
   }, [frames]);
 
@@ -170,8 +175,8 @@ const App: React.FC = () => {
 
   // Settings
   const [settings, setSettings] = useState<AppSettings>({
-    samplingInterval: 3, // Default 3 seconds
-    shotMode: 'cuts',
+    samplingInterval: 5, // Default: one frame every 5 seconds across the whole video
+    shotMode: 'interval',
     sceneThreshold: 27,
     xaiModel: 'grok-4.6',
     customInstructions: '',
@@ -303,7 +308,7 @@ const App: React.FC = () => {
       if (settings.shotMode === 'cuts') {
         extractedFrames = await extractShotFramesFromVideo(
           videoUrl,
-          { threshold: settings.sceneThreshold, maxShots: 40 },
+          { threshold: settings.sceneThreshold, maxShots: Number.POSITIVE_INFINITY },
           (prog) => setProgress(prog)
         );
         if (extractedFrames.length < 2) {
